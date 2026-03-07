@@ -1,0 +1,9 @@
+{
+    "name": "nish-logic-gk-database",
+    "version": "1.0.0",
+    "description": "Headless Decoupled Storage for Nish Logic",
+    "main": "scripts/autonomous_gen.js",
+    "dependencies": {
+        "@google/generative-ai": "^0.2.1"
+    }
+}
