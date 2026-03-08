@@ -118,6 +118,7 @@ async function fetchQuestions(subject, level, isCA = false) {
             "options": ["A", "B", "C", "D"],
             "correct_answer": "correct option content",
             "explanation": "Detailed explanation here...",
+            "trick": "",
             "category": "${isCA ? 'Current Affairs' : subject}"
           }
         ]
