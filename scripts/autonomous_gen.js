@@ -121,6 +121,13 @@ async function fetchQuestions(subject, level, isCA = false) {
     const result = await model.generateContent(prompt);
     let resp = result.response.text().trim();
     resp = resp.replace(/^```[a-z]*\n?/gm, '').replace(/```$/g, '').trim();
+
+    // Extract JSON array robustly in case model includes conversational text
+    const match = resp.match(/\[[\s\S]*\]/);
+    if (match) {
+        resp = match[0];
+    }
+
     return JSON.parse(resp);
 }
 
@@ -132,7 +139,9 @@ async function main() {
 
     // 1. Current Affairs Phase (Target 100)
     console.log(`\nPhase 1: Generating Current Affairs (Past 6 Months)...`);
-    while (caAdded < CA_DAILY_TARGET) {
+    let caRetries = 0;
+    const MAX_CA_RETRIES = 15;
+    while (caAdded < CA_DAILY_TARGET && caRetries < MAX_CA_RETRIES) {
         try {
             const batch = await fetchQuestions('current_affairs', 0, true);
             const filePath = path.join(ROOT_DIR, 'current_affairs', 'latest.json');
@@ -152,16 +161,26 @@ async function main() {
             fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
             fs.writeFileSync(HASH_FILE, JSON.stringify(Array.from(usedHashes)));
             console.log(`Saved ${batchCount} unique CA. Count: ${caAdded}/${CA_DAILY_TARGET}`);
+            // Reset retries after success
+            caRetries = 0;
             await delay(DELAY_MS);
         } catch (e) {
             console.error("CA Fetch Error:", e.message);
+            caRetries++;
+            console.log(`CA Retry ${caRetries}/${MAX_CA_RETRIES}...`);
             await delay(DELAY_MS * 2);
         }
+    }
+    if (caRetries >= MAX_CA_RETRIES) {
+        console.error("MAX CA RETRIES REACHED. Breaking out of CA phase.");
     }
 
     // 2. Static GK Phase (Target 400)
     console.log(`\nPhase 2: Generating Syllabus-Guided GK (NCERT/IGNOU/UPSC)...`);
     const subjects = ['history', 'geography', 'polity'];
+
+    let gkRetries = 0;
+    const MAX_GK_RETRIES_PER_CALL = 10;
 
     outer:
     while (gkAdded < GK_DAILY_TARGET) {
@@ -170,32 +189,52 @@ async function main() {
                 if (gkAdded >= GK_DAILY_TARGET) break outer;
 
                 console.log(`Fetching 10 for ${sub.toUpperCase()} Level ${lvl}...`);
-                try {
-                    const batch = await fetchQuestions(sub, lvl);
-                    const filePath = path.join(ROOT_DIR, sub, `level_${lvl}.json`);
-                    let data = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath)) : [];
+                let callSuccess = false;
+                let currentCallRetries = 0;
 
-                    let batchAdded = 0;
-                    for (const q of batch) {
-                        const h = generateHash(q.question);
-                        if (!usedHashes.has(h)) {
-                            usedHashes.add(h);
-                            data.push(q);
-                            gkAdded++;
-                            totalAdded++;
-                            batchAdded++;
+                while (!callSuccess && currentCallRetries < MAX_GK_RETRIES_PER_CALL) {
+                    try {
+                        const batch = await fetchQuestions(sub, lvl);
+                        const filePath = path.join(ROOT_DIR, sub, `level_${lvl}.json`);
+                        let data = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath)) : [];
+
+                        let batchAdded = 0;
+                        for (const q of batch) {
+                            const h = generateHash(q.question);
+                            if (!usedHashes.has(h)) {
+                                usedHashes.add(h);
+                                data.push(q);
+                                gkAdded++;
+                                totalAdded++;
+                                batchAdded++;
+                            }
+                        }
+                        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+                        fs.writeFileSync(HASH_FILE, JSON.stringify(Array.from(usedHashes)));
+                        console.log(`Stored ${batchAdded} unique. GK Progress: ${gkAdded}/${GK_DAILY_TARGET}`);
+                        callSuccess = true;
+                        // reset retry limit on success
+                        gkRetries = 0;
+                        await delay(DELAY_MS);
+                    } catch (e) {
+                        console.error(`${sub} L${lvl} Error:`, e.message);
+                        currentCallRetries++;
+                        gkRetries++;
+                        console.log(`GK Retry ${currentCallRetries}/${MAX_GK_RETRIES_PER_CALL} for this topic. Total GK retries: ${gkRetries}`);
+                        await delay(DELAY_MS * 2);
+
+                        // If we fail too many times consistently across topics, break everything to avoid 6hr loops
+                        if (gkRetries > 30) {
+                            console.error("FATAL: Too many consecutive GK failures across topics. Breaking completely to prevent timeout.");
+                            break outer;
                         }
                     }
-                    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-                    fs.writeFileSync(HASH_FILE, JSON.stringify(Array.from(usedHashes)));
-                    console.log(`Stored ${batchAdded} unique. GK Progress: ${gkAdded}/${GK_DAILY_TARGET}`);
-                    await delay(DELAY_MS);
-                } catch (e) {
-                    console.error(`${sub} L${lvl} Error:`, e.message);
-                    await delay(DELAY_MS * 2);
                 }
             }
         }
+        // If we looped through all subjects and levels and didn't hit the target, we should break to avoid infinite loop
+        // We can check if any items were added in this full loop iteration, but simpler tracking is enough for now.
+        if (gkRetries > 30) break;
     }
 
     console.log(`\n=== NIGHTLY COMPLETE: Added ${totalAdded} New Questions ===`);
