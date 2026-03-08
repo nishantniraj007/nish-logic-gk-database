@@ -61,7 +61,11 @@ const syllabusIndex = {
 
 // --- Setup System ---
 DATA_DIRS.forEach(dir => {
-    if (!fs.existsSync(path.join(ROOT_DIR, dir))) fs.mkdirSync(path.join(ROOT_DIR, dir), { recursive: true });
+    const fullPath = path.join(ROOT_DIR, dir);
+    if (!fs.existsSync(fullPath)) {
+        fs.mkdirSync(fullPath, { recursive: true });
+        console.log(`Created directory: ${fullPath}`);
+    }
 });
 if (!fs.existsSync(path.join(ROOT_DIR, 'data'))) fs.mkdirSync(path.join(ROOT_DIR, 'data'), { recursive: true });
 
@@ -85,23 +89,24 @@ async function fetchQuestions(subject, level, isCA = false) {
     let prompt = "";
     if (isCA) {
         prompt = `
-            Act as an expert exam creator for UPSC/SSC. Generate exactly 10 high-quality MCQs based ONLY on Current Affairs from the PAST 6 MONTHS.
-            Focus on: National international events, Sports, Appointments, Awards, Infrastructure, Science & Tech.
-            
-            Rules:
-            1. Return raw JSON Array. No markdown.
-            2. Factually verified and recent (last 180 days).
+            SYSTEM: You are a robotic exam data generator. Output ONLY valid JSON. No conversational text.
+            TASK: Generate exactly 10 high-quality MCQs based ONLY on Current Affairs from the PAST 6 MONTHS.
+            SUBJECT: Current Affairs (National, International, Sports, Appointments, Science & Tech).
+            RULES:
+            - Content must be factually accurate and recent.
+            - Provide 4 distinct options.
+            - Ensure 'explanation' provides context.
         `;
     } else {
         const topic = syllabusIndex[subject][level] || "General subject matter";
         prompt = `
-            Act as an expert Indian exam creator. Generate exactly 10 highly accurate MCQs for ${subject.toUpperCase()} level ${level}.
-            Syllabus Focus: ${topic}.
-            
-            Rules:
-            1. No markdown. Return raw JSON Array.
-            2. Depth: Level 7-12 (NCERT Standard), Level 13-17 (IGNOU/UPSC Graduation Standard).
-            3. Dig deep into specific historical/geographic/political facts.
+            SYSTEM: You are a robotic exam data generator. Output ONLY valid JSON. No conversational text.
+            TASK: Generate exactly 10 highly accurate MCQs for ${subject.toUpperCase()} level ${level}.
+            TOPIC: ${topic}.
+            RULES:
+            - Depth: ${level >= 13 ? 'Masters/Graduation level' : 'NCERT/School level'}.
+            - Dig deep into specific facts.
+            - No preamble or "Here are your questions".
         `;
     }
 
